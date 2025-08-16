@@ -1,0 +1,449 @@
+LASTENHEFT – Prognose-Webapp für Sportwetten (Fußball & Basketball)
+===================================================================
+Ziel
+----
+Replit AI und Devin AI sollen anhand dieses Lastenhefts ein lauffähiges System entwickeln, das Wahrscheinlichkeiten
+für 1X2, Over/Under 1,5 & 2,5, BTTS sowie Handicap ±1 berechnet – ohne Buchmacherquoten. Daten kommen aus API-Football
+(und API-Basketball). Das System läuft als Docker‑Compose‑Stack (frontend, backend, postgres). Ein `docker compose up -d`
+muss reichen.
+
+Leitlinien
+----------
+- Moderne, übersichtliche UI, klarer Fokus auf Nutzbarkeit.
+- Frontend: React + Vite + TypeScript.
+- Backend: Node.js + Express (TypeScript).
+- Datenbank: PostgreSQL.
+- Deployment: Docker & Docker Compose (bereitgestellt in diesem Dokument).
+- Mehr-Ligen-fähig: jede Liga isoliert trainiert/kalibriert.
+- Keine Quoten-Nutzung (rein probabilistische Engine).
+
+Funktionaler Umfang (MVP)
+-------------------------
+1) Ligen/Teams/Spiele
+   - Import von Ligen, Teams, Seasons, Fixtures (kommende & vergangene) aus API-Football / API-Basketball.
+   - Speicherung in PostgreSQL. Inkrementeller Sync per Scheduler (cron/Worker).
+2) Modelle (Liga-lokal)
+   - Fußball: Poisson-Tor‑Modell (optional später Dixon–Coles) + Home-Advantage, Zeitgewichtung.
+   - Basketball: MoV‑Elo + Normalmodell der Punktedifferenz (für 1X2 & Handicap).
+   - Elo pro Liga zur Form/SoS (Home‑Bonus, optional Zeitzerfall).
+   - Ensemble (gewichtete Kombination), Kalibrierung (Isotonic je Liga & Markt).
+3) Märkte (ohne Quoten)
+   - 1X2, Over/Under 1.5 & 2.5, BTTS, Handicap ±1 (über Skellam/Normal).
+   - Picks via feste Schwellwerte (konfigurierbar je Liga/Markt).
+4) Backtesting & Qualität
+   - Rolling‑Backtests pro Liga mit LogLoss, Brier, Calibration Curves.
+   - Drift‑Monitoring (Warnung bei Verschlechterung).
+5) UI/UX
+   - League Dashboard: Liste kommender Spiele mit Wahrscheinlichkeiten, Picks, Konfidenz‑Badges.
+   - Fixture Detail: λ_home/λ_away (Fußball), Ergebnisverteilung (Heatmap), Elo‑Verlauf, Feature‑Panel.
+   - Backtest Ansicht: Metriken über Zeit, Reliability‑Plot.
+6) Admin/Jobs
+   - Buttons/Endpoints zum Re‑Train/Reco/Kalibrierung triggern.
+   - Geplante Jobs: nightly Pull, Feature‑Build, wöchentlich Train, pre‑match Predict.
+
+Nicht‑Ziele (MVP)
+-----------------
+- Keine Wettabgabe/Vermittlung. Keine ROI/Value‑Berechnung (da keine Quoten).
+- Kein User‑Login/Payments.
+- Kein xG, falls nicht verfügbar – später optional.
+
+Technische Anforderungen
+-----------------------
+Architektur
+- Services: frontend (Vite React static), backend (Express API), db (Postgres).
+- Kommunikation: Frontend ruft Backend via HTTP/JSON; Backend spricht Postgres.
+- Konfiguration via .env (siehe Beispiele), Secrets über Docker‑Compose.
+
+API (Backend, erste Endpunkte)
+- GET /api/health → Status + DB‑Reachability.
+- GET /api/leagues → Auflistung der unterstützten Ligen.
+- GET /api/fixtures?leagueId=&from=&to= → kommende/verg. Spiele.
+- GET /api/predictions/:fixtureId → Wahrscheinlichkeiten (1X2, O/U 1.5 & 2.5, BTTS, HC ±1).
+- POST /api/admin/retrain → (später) retrain models.
+- POST /api/admin/recalibrate → (später) retrain calibration.
+
+DB‑Schema (Start, minimal)
+- leagues(id, name, sport, country)
+- seasons(id, league_id, year, start_date, end_date)
+- teams(id, league_id, name)
+- fixtures(id, league_id, season_id, date, home_id, away_id, status, goals_home, goals_away)
+- elo_snapshots(date, league_id, team_id, elo)
+- features(fixture_id, jsonb)
+- predictions(fixture_id, model_version, market, selection, prob, created_at)
+- calibration(league_id, market, version, mapping_blob)
+
+Datenpipelines (Beschreibung)
+- Seed: Ligen/Teams/Seasons initial laden.
+- Nightly: fixtures (±14 Tage), results, elo update, features builden.
+- Weekly: Modelle trainieren & kalibrieren.
+- Predict: für kommende fixtures Wahrscheinlichkeiten + Schwellen‑Picks erzeugen.
+
+Code‑Qualität & Betrieb
+- TypeScript strict, ESLint + Prettier.
+- Healthchecks & Logs (pino/console), strukturierte Fehlerbehandlung.
+- Docker Images schlank (alpine, multistage). Compose mit Healthchecks.
+- „12‑Factor“-Konfig per ENV.
+
+Konfiguration (.env Beispiele)
+- BACKEND:
+  - PORT=8080
+  - DB_HOST=postgres
+  - DB_PORT=5432
+  - DB_USER=app
+  - DB_PASSWORD=app
+  - DB_NAME=app
+- FRONTEND:
+  - Keine zwingend nötig; API‑Base wird automatisch auf Port 8080 des Hosts gesetzt.
+
+Build & Deployment
+------------------
+- Bereitgestellte Dockerfiles (frontend, backend) und docker‑compose.yml (siehe unten).
+- Befehl: `docker compose up -d` baut & startet alles. Frontend unter `http://localhost:5173`, Backend `http://localhost:8080`.
+
+Sicherheits‑/Rechtshinweise
+---------------------------
+- Keine Wettvermittlung/‑annahme. Klarer Disclaimer (18+, Glücksspielhinweis).
+- API‑Keys für externe Datenquellen nicht im Image backen, sondern via ENV.
+
+Akzeptanzkriterien (MVP „Done“)
+-------------------------------
+- `docker compose up -d` startet 3 Container (frontend, backend, postgres) ohne manuelle Schritte.
+- GET /api/health liefert `{ ok: true }` und DB‑Status.
+- Frontend zeigt Startseite mit „System läuft“ & Backend‑Health‑Check.
+- Code‑Gerüst und Platzhalter für Modelle/Jobs vorhanden.
+- README (Kurzstart) vorhanden.
+
+---
+Integrierte Artefakte (Dateiinhalte)
+====================================
+
+docker-compose.yml
+------------------
+```yaml
+version: "3.9"
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: ./backend
+    environment:
+      PORT: 8080
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: app
+      DB_PASSWORD: app
+      DB_NAME: app
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
+```
+
+backend/Dockerfile
+------------------
+```Dockerfile
+# --- build stage ---
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm install
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+# --- run stage ---
+FROM node:20-alpine AS run
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+EXPOSE 8080
+CMD ["node", "dist/index.js"]
+```
+
+frontend/Dockerfile
+-------------------
+```Dockerfile
+# --- build stage ---
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm install
+COPY tsconfig.json vite.config.ts index.html ./
+COPY src ./src
+RUN npm run build
+
+# --- serve static with nginx ---
+FROM nginx:alpine AS run
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+backend/package.json
+--------------------
+```json
+{
+  "name": "wetten-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.30",
+    "tsx": "^4.16.2",
+    "typescript": "^5.4.0"
+  }
+}
+```
+
+backend/tsconfig.json
+---------------------
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "bundler",
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}
+```
+
+backend/src/index.ts
+--------------------
+```ts
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import pkg from "pg";
+
+dotenv.config();
+const { Client } = pkg;
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const PORT = parseInt(process.env.PORT || "8080", 10);
+
+function getDbClient() {
+  return new Client({
+    host: process.env.DB_HOST || "localhost",
+    port: parseInt(process.env.DB_PORT || "5432", 10),
+    user: process.env.DB_USER || "app",
+    password: process.env.DB_PASSWORD || "app",
+    database: process.env.DB_NAME || "app"
+  });
+}
+
+app.get("/api/health", async (_req, res) => {
+  const client = getDbClient();
+  try {
+    await client.connect();
+    const r = await client.query("SELECT 1 as ok");
+    await client.end();
+    res.json({ ok: true, db: r.rows[0]?.ok === 1 });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`[backend] listening on ${PORT}`);
+});
+```
+
+frontend/package.json
+---------------------
+```json
+{
+  "name": "wetten-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0"
+  }
+}
+```
+
+frontend/tsconfig.json
+----------------------
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true
+  },
+  "include": ["src"]
+}
+```
+
+frontend/vite.config.ts
+-----------------------
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: true
+  }
+});
+```
+
+frontend/index.html
+-------------------
+```html
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wett-Prognose (MVP)</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+```
+
+frontend/src/main.tsx
+---------------------
+```ts
+import React from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+
+createRoot(document.getElementById("root")!).render(<App />);
+```
+
+frontend/src/App.tsx
+--------------------
+```ts
+import React, { useEffect, useState } from "react";
+
+export default function App() {
+  const [status, setStatus] = useState<null | { ok: boolean; db?: boolean; error?: string }>(null);
+
+  useEffect(() => {
+    const url = `${window.location.protocol}//${window.location.hostname}:8080/api/health`;
+    fetch(url)
+      .then(r => r.json())
+      .then(setStatus)
+      .catch(e => setStatus({ ok: false, error: String(e) }));
+  }, []);
+
+  return (
+    <div style={{ fontFamily: "ui-sans-serif, system-ui", padding: 24, lineHeight: 1.4 }}>
+      <h1 style={{ fontSize: 28, marginBottom: 8 }}>Wett-Prognose – MVP</h1>
+      <p style={{ opacity: 0.8, marginBottom: 16 }}>
+        Minimaler Skeleton zur Inbetriebnahme. Frontend (React/Vite) + Backend (Express) + PostgreSQL (Docker).
+      </p>
+      <div style={{ padding: 16, border: "1px solid #ddd", borderRadius: 12, maxWidth: 520 }}>
+        <h2 style={{ fontSize: 20, marginBottom: 8 }}>Systemstatus</h2>
+        {!status && <p>Lade…</p>}
+        {status && status.ok && <p>✅ Backend läuft. DB erreichbar: {String(status.db)}</p>}
+        {status && !status.ok && (
+          <div>
+            <p>❌ Fehler</p>
+            <pre style={{ whiteSpace: "pre-wrap" }}>{status.error}</pre>
+          </div>
+        )}
+      </div>
+      <p style={{ marginTop: 16, opacity: 0.7 }}>
+        Nächste Schritte: Modelle/Jobs gemäß Lastenheft implementieren (Poisson/Elo, Kalibrierung, Backtests).
+      </p>
+    </div>
+  );
+}
+```
+
+README.txt (Kurzstart)
+----------------------
+```
+# Kurzstart
+1) Voraussetzung: Docker & Docker Compose installiert.
+2) In dieses Verzeichnis wechseln.
+3) `docker compose up -d`
+4) Frontend: http://localhost:5173 , Backend: http://localhost:8080
+
+Standard-DB:
+  POSTGRES_USER=app
+  POSTGRES_PASSWORD=app
+  POSTGRES_DB=app
+```
+
+Hinweise für Replit AI / Devin AI
+---------------------------------
+- Den hier definierten Skeleton beibehalten und um Datenzugriffe (API-Football/Basketball), DB-Schema, Modelle,
+  Backtests und Admin-Endpunkte erweitern.
+- Für Scheduler: entweder Node‑Cron im Backend oder separater Worker‑Service (optional) hinzufügen.
+- Strikte Liga-Isolation für Modelle/Kalibrierung wahren.
