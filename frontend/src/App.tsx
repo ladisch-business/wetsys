@@ -1,36 +1,25 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import Navigation from "./components/Navigation";
+import SystemStatus from "./pages/SystemStatus";
+import LeagueDashboard from "./pages/LeagueDashboard";
+import FixtureDetail from "./pages/FixtureDetail";
+import BacktestDashboard from "./pages/BacktestDashboard";
+import AdminDashboard from "./pages/AdminDashboard";
 
 export default function App() {
-  const [status, setStatus] = useState<null | { ok: boolean; db?: boolean; error?: string }>(null);
-
-  useEffect(() => {
-    const url = `${window.location.protocol}//${window.location.hostname}:8080/api/health`;
-    fetch(url)
-      .then(r => r.json())
-      .then(setStatus)
-      .catch(e => setStatus({ ok: false, error: String(e) }));
-  }, []);
-
   return (
-    <div style={{ fontFamily: "ui-sans-serif, system-ui", padding: 24, lineHeight: 1.4 }}>
-      <h1 style={{ fontSize: 28, marginBottom: 8 }}>Wett-Prognose – MVP</h1>
-      <p style={{ opacity: 0.8, marginBottom: 16 }}>
-        Minimaler Skeleton zur Inbetriebnahme. Frontend (React/Vite) + Backend (Express) + PostgreSQL (Docker).
-      </p>
-      <div style={{ padding: 16, border: "1px solid #ddd", borderRadius: 12, maxWidth: 520 }}>
-        <h2 style={{ fontSize: 20, marginBottom: 8 }}>Systemstatus</h2>
-        {!status && <p>Lade…</p>}
-        {status && status.ok && <p>✅ Backend läuft. DB erreichbar: {String(status.db)}</p>}
-        {status && !status.ok && (
-          <div>
-            <p>❌ Fehler</p>
-            <pre style={{ whiteSpace: "pre-wrap" }}>{status.error}</pre>
-          </div>
-        )}
+    <Router>
+      <div style={{ fontFamily: "ui-sans-serif, system-ui", minHeight: "100vh" }}>
+        <Navigation />
+        <Routes>
+          <Route path="/" element={<SystemStatus />} />
+          <Route path="/leagues" element={<LeagueDashboard />} />
+          <Route path="/fixture/:fixtureId" element={<FixtureDetail />} />
+          <Route path="/backtest" element={<BacktestDashboard />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+        </Routes>
       </div>
-      <p style={{ marginTop: 16, opacity: 0.7 }}>
-        Nächste Schritte: Modelle/Jobs gemäß Lastenheft implementieren (Poisson/Elo, Kalibrierung, Backtests).
-      </p>
-    </div>
+    </Router>
   );
 }
